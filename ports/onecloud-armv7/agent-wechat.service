@@ -1,0 +1,21 @@
+[Unit]
+Description=Agent WeChat on OneCloud ARMv7
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=agent-wechat
+Group=agent-wechat
+WorkingDirectory=/var/lib/agent-wechat
+Environment=HOME=/var/lib/agent-wechat
+UMask=0077
+ExecStart=/usr/local/bin/wx serve
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/agent-wechat
+
+[Install]
+WantedBy=multi-user.target

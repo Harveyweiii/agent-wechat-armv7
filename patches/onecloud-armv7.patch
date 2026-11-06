@@ -1,0 +1,65 @@
+diff --git a/packages/native-client-rust/crates/wechat-core/src/media_video.rs b/packages/native-client-rust/crates/wechat-core/src/media_video.rs
+index ff32e82..a346426 100644
+--- a/packages/native-client-rust/crates/wechat-core/src/media_video.rs
++++ b/packages/native-client-rust/crates/wechat-core/src/media_video.rs
+@@ -8,7 +8,7 @@ use std::{
+     process::{Child, Command, Stdio},
+     sync::{
+         atomic::{AtomicBool, Ordering},
+-        Arc,
++        Arc, OnceLock,
+     },
+     thread,
+     time::{Duration, Instant},
+@@ -21,6 +21,26 @@ const STDERR_LIMIT: usize = 16_384;
+ const PREPARE_TIMEOUT: Duration = Duration::from_secs(300);
+ const POLL_INTERVAL: Duration = Duration::from_millis(50);
+ 
++fn normal_scale_filter() -> &'static str {
++    const CURRENT: &str = "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30";
++    const LEGACY: &str = "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2,setsar=1,fps=30";
++    static SUPPORTS_FORCE_DIVISIBLE_BY: OnceLock<bool> = OnceLock::new();
++    if *SUPPORTS_FORCE_DIVISIBLE_BY.get_or_init(|| {
++        Command::new("ffmpeg")
++            .args(["-hide_banner", "-h", "filter=scale"])
++            .output()
++            .map(|output| {
++                output.status.success()
++                    && String::from_utf8_lossy(&output.stdout).contains("force_divisible_by")
++            })
++            .unwrap_or(false)
++    }) {
++        CURRENT
++    } else {
++        LEGACY
++    }
++}
++
+ /// Produce one MP4 with H.264 Main/yuv420p, longest edge at most 720, at most 30
+ /// frames/second, and stereo 48kHz AAC when the source has audio. The bitrate
+ /// budget reserves 20% of the upload cap for muxing/encoder variation. Inputs
+@@ -98,7 +118,7 @@ pub(super) fn prepare_normal(
+         "-sn",
+         "-dn",
+         "-vf",
+-        "scale=w='min(720,iw)':h='min(720,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=30",
++        normal_scale_filter(),
+         "-c:v",
+         "libx264",
+         "-preset",
+diff --git a/packages/native-client-rust/crates/wechat-protocol/build.rs b/packages/native-client-rust/crates/wechat-protocol/build.rs
+index 0927cff..40fc6ee 100644
+--- a/packages/native-client-rust/crates/wechat-protocol/build.rs
++++ b/packages/native-client-rust/crates/wechat-protocol/build.rs
+@@ -6,6 +6,11 @@ fn main() {
+         .warnings(false)
+         .flag_if_supported("-fwrapv")
+         .flag_if_supported("-fno-strict-aliasing");
++    // The vendored build includes C sources only. Its ARM assembly path expects
++    // symbols from assembly files that are not part of this build.
++    if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() == Ok("arm") {
++        build.define("NO_ASM", None);
++    }
+     let mut files = std::fs::read_dir("vendor/silk/src")
+         .expect("vendored SILK sources")
+         .map(|e| e.expect("source entry").path())
